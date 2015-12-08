@@ -234,7 +234,7 @@ public class WarlockRipper extends EPGDataSource
   }
 
   public static String getEPGLicenseKey() {
-    return Sage.WINDOWS_OS ? System.getProperty("USERKEY") : IOUtils.getFileAsString(new java.io.File("activkey"));
+    return Sage.WINDOWS_OS ? System.getProperty("USERKEY") : IOUtils.getFileAsString(new java.io.File("activkey")).trim();
   }
 
   public static boolean doesHaveEpgLicense() {
@@ -311,7 +311,11 @@ public class WarlockRipper extends EPGDataSource
   protected boolean extractGuide(long inGuideTime)
   {
     if (!doesHaveEpgLicense()) {
-      System.out.println("You do not have a SageTV license, you cannot download EPG data.");
+      if (usesPlugin())
+      {
+        return EPG.getInstance().pluginExtractGuide(Long.toString(providerID));
+      }
+      System.out.println("You do not have a SageTV license or an EPG plugin installed, you cannot download EPG data.");
       return false;
     }
     guideTime = Sage.time(); //inGuideTime;

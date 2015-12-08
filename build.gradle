@@ -1,9 +1,12 @@
+import org.gradle.internal.os.OperatingSystem
+
+plugins {
+	id "com.jfrog.bintray" version "1.3.1"
+}
+
 apply plugin: "java"
 apply plugin: "eclipse"
 apply plugin: "idea"
-
-// Sage Version -- Not used for now
-version = '9.0'
 
 // Globals
 ext {
@@ -12,14 +15,35 @@ ext {
     appName = 'SageTV'
     sageJarName = 'Sage.jar'
     sageJarDestinationDir = 'build/release/'
+	sageReleaseDestinationDir = 'build/serverrelease/'
+	sageJarPackageDestinationDir = 'build/'
     
     miniJarName = 'MiniClient.jar'
     miniJarDestinationDir = 'build/minirelease/'
+	
+	miniclientReleaseDestinationDir = 'build/clientrelease/'
 
-    jogampVer = '2.0.2'
+	// This the version of JOGL we are using
+    jogampVer = '2.3.1'
 	
 	arch=Integer.parseInt(System.getProperty('sun.arch.data.model')); // 32 or 64
+	releaseBuild = (System.getProperty("SAGETV_RELEASE", System.getenv("SAGETV_RELEASE")) != null)	
+	snapshotId = (releaseBuild?"":("SNAPSHOT-"+ new java.text.SimpleDateFormat("yyyyMMdd_hhmm").format(new java.util.Date() )))
+
+	versionText = new File('java/sage/Version.java').text
+	majorVersion = (versionText =~ /MAJOR_VERSION = ([0-9]+)/)[0][1]
+	minorVersion = (versionText =~ /MINOR_VERSION = ([0-9]+)/)[0][1]
+	microVersion = (versionText =~ /MICRO_VERSION = ([0-9]+)/)[0][1]
+	buildVersion =  getBuildNumber()
+
+	baseVersion = "${majorVersion}.${minorVersion}.${microVersion}.${buildVersion}"
+	versionArch = "${baseVersion}_" + (arch==64 ? 'amd64' : 'i386')
 }
+
+version = baseVersion
+
+// Just printing out the SAGETV build version for informational purposes
+// System.out.println("SAGETV VERSION ${versionArch}");
 
 // set gradle's buildDir to something other than the default 'build', or
 // we'll end up deleting EVERYTHING in 'build' when we ./gradlew clean
@@ -32,10 +56,6 @@ repositories {
 
 configurations {
 	miniclient.extendsFrom compile
-	miniclientRuntime
-	miniclientRuntimeLinux32
-	miniclientRuntimeLinux64
-	miniclientArch
 }
 
 // Maybe someday we'll target >1.5 (hopefully)
@@ -90,6 +110,26 @@ sourceSets {
 	}
 }
 
+dependencies {
+	compile files(
+		'third_party/UPnPLib/sbbi-upnplib-1.0.3.jar',
+
+		'third_party/Oracle/vecmath.jar',
+		'third_party/Lucene/lucene-core-3.6.0.jar',
+		'third_party/JCIFS/jcifs-1.1.6.jar',
+	)
+  
+	compile 'com.apple:AppleJavaExtensions:1.4'
+	compile "org.jogamp.jogl:jogl-all:$jogampVer"
+	compile "org.jogamp.gluegen:gluegen-rt-main:$jogampVer"
+	
+	
+	// Miniclient dependendencies for compiling
+	miniclientCompile "org.jogamp.gluegen:gluegen-rt-main:$jogampVer"
+	miniclientCompile "org.jogamp.jogl:jogl-all-main:$jogampVer"
+}
+
+
 /**
  * this is sort of a hack... normally we'd never set the -sourcepath on a java compile
  * but, sagetv usues this hack to selectively compile and include files into each jar
@@ -100,57 +140,8 @@ tasks.withType(JavaCompile) {
 	options.compilerArgs << "-sourcepath" << sourceSets.main.java.srcDirs.join(":")
 }
 
-task miniclient(type:JavaCompile){
-	description = "Build miniclient classes"
-	println('MiniClient Build')	
+task miniclient(type:JavaCompile) << {
 }
-
-dependencies {
-    compile files(
-    	'third_party/UPnPLib/sbbi-upnplib-1.0.3.jar',
-
-		'third_party/JOGL/Linux/gluegen-rt.jar',
-		'third_party/JOGL/Linux/nativewindow.all.jar',
-		'third_party/JOGL/Linux/jogl.all.jar',
-    	
-    	'third_party/Oracle/vecmath.jar',
-    	'third_party/Lucene/lucene-core-3.6.0.jar',
-    	'third_party/JCIFS/jcifs-1.1.6.jar',
-    )
-  
-    compile 'com.apple:AppleJavaExtensions:1.4'
-
-	
-	// Miniclient dependendencies for compiling
-	miniclientCompile files(
-		'third_party/UPnPLib/sbbi-upnplib-1.0.3.jar',
-
-		'third_party/JOGL/Linux/gluegen-rt.jar',
-		'third_party/JOGL/Linux/nativewindow.all.jar',
-		'third_party/JOGL/Linux/jogl.all.jar',
-		
-		'third_party/Oracle/vecmath.jar',
-		'third_party/Lucene/lucene-core-3.6.0.jar',
-		'third_party/JCIFS/jcifs-1.1.6.jar',
-	)  
-	miniclientCompile 'com.apple:AppleJavaExtensions:1.4'
-
-	// setup the miniclient dependencies for 32/64 bit linux
-	// looks like miniclient is only linux
-	// eventually if we upgrade the JOGL this is how we can do it, dynamically
-//	miniclientRuntime "org.jogamp.jogl:jogl-all:$jogampVer"	
-//	miniclientRuntime ("org.jogamp.gluegen:gluegen:$jogampVer") {
-//		transitive false
-//	}
-//	miniclientRuntime ("org.jogamp.gluegen:gluegen-rt-main:$jogampVer") {
-//		transitive false
-//	}
-//	miniclientRuntimeLinux32 "org.jogamp.jogl:jogl-all:$jogampVer:natives-linux-i586"
-//	miniclientRuntimeLinux32 "org.jogamp.gluegen:gluegen-rt:$jogampVer:natives-linux-i586"
-//	miniclientRuntimeLinux64 "org.jogamp.jogl:jogl-all:$jogampVer:natives-linux-amd64"
-//	miniclientRuntimeLinux64 "org.jogamp.gluegen:gluegen-rt:$jogampVer:natives-linux-amd64"
-}
-
 
 // remove the Sage.jar before updating it
 task cleanSageJar(type: Delete) {
@@ -219,7 +210,7 @@ def linuxScript(String script) {
 }
 
 // currently Linux Only -- Need to look at supporting Windows 
-task (linuxMiniclientRelease) << {
+task (linuxMiniClientRelease) << {
 	if (!OperatingSystem.current().isLinux()) {
 		throw new GradleException('This target is not supported on Windows, yet.');
 	}
@@ -232,7 +223,7 @@ task (linuxMiniclientRelease) << {
 		linuxScript('./build3rdparty.sh');
 	}
 	
-	delete 'build/clientrelease'
+	delete miniclientReleaseDestinationDir
 	
 	copy {
 	 	from('build/minirelease/MiniClient.jar') {
@@ -247,19 +238,12 @@ task (linuxMiniclientRelease) << {
 		from ('build/so/libImageLoader.so')	
 	    from ('build/elf/mplayer')
 	
-		//from (configurations.miniclientRuntime)
+		from (configurations.miniclientRuntime)  
 		
-		if (arch==32) {
-			from ('third_party/JOGL/Linux/') {
-				include "*"
-			}
-		} else {
-			// no 64 bit JOGL support, yet
-		}
+	    into(miniclientReleaseDestinationDir)
 		
-	    into('build/clientrelease')
+		exclude '**/*-macosx-*', '**/*-solaris-*', '**/*-windows-*', '**/*-android-*', '**/*-linux-arm*'
     }	
-
 }
 
 // build RAW javadoc
@@ -267,11 +251,105 @@ task sageJavadoc(type: Javadoc) {
   source = sourceSets.main.allJava
 }
 
-// task dependencies
-sageJar.dependsOn classes, cleanSageJar
-miniclientJar.dependsOn miniclientClasses, cleanMiniJar
-linuxMiniclientRelease.dependsOn miniclientJar
+/**
+ * Package SageTV jar and the STV together
+ */
+task (packageSageJar) << {
+	file(sageJarPackageDestinationDir).mkdirs();
+	
+	ant.zip(destfile: new File(sageJarPackageDestinationDir,"SageJar-${baseVersion}.zip").getAbsolutePath()) {
+		fileset(dir: sageJarDestinationDir) {
+			include(name: '*.jar')
+		}
+		zipfileset(dir: 'stvs/SageTV7', prefix: 'STVs/SageTV7/') {
+			include(name: 'SageTV7.xml')
+			
+		}
+	}
+}
 
+/**
+ * Get the current build number from the git commit history, but use the .buildnumber or SageConstants
+ * if the git command is not available.
+ * 
+ * @return build number
+ */
+def getBuildNumber() {
+	def buildVerText = new File('java/sage/SageConstants.java').text
+	// pull the build number from the .buildnumber, if it exists, otherwise, look in SageConstants.java
+	def buildVer =  (new File('.buildnumber').exists())?(new File(".buildnumber").text) : (buildVerText =~ /BUILD_VERSION = ([0-9]+)/)[0][1]
+	
+	if (OperatingSystem.current().isLinux()) {
+		// use git to find the build version
+		ant.exec(
+			command: 'git rev-list HEAD --count',
+			os: 'Linux',
+			failonerror: true,
+			outputproperty: 'sagebuildnum')
+		
+		buildVer = ant.sagebuildnum		
+	}
+	
+	if (buildVer == null) buildVer=0;
+	return buildVer;
+}
+
+/**
+ * Task to update the build number in SageConstants based on the # of git commits
+ * Not sure I like it, yet.
+ */
+task (updateBuildNumber) << {
+	buildVersion = getBuildNumber()
+	
+	def file = new File('java/sage/SageConstants.java');
+	def fileBak = new File('java/sage/SageConstants.java.bak');
+	
+	if (!fileBak.exists()) {
+		fileBak.text = file.text
+		System.out.println("Backed up ${file}")
+	}
+	
+	// update SageConstants.java
+	ant.replaceregexp(
+		file: 'java/sage/SageConstants.java', 
+		match: "public static final int BUILD_VERSION = [0-9]+;",
+		replace: "public static final int BUILD_VERSION = ${buildVersion};"
+	)
+
+	// reupdate these values since buildVersion changes	
+	baseVersion = "${majorVersion}.${minorVersion}.${microVersion}.${buildVersion}"
+	versionArch = "${baseVersion}_" + (arch==64 ? 'amd64' : 'i386')
+	
+	System.out.println("SAGETV VERSION ${versionArch}");
+	
+	// save buildnumber to file
+	// we'll be referencing it later
+	// Eventually we'll do this, but for now, fetch it every time
+	// new File('.buildnumber').write(buildVersion)
+}
+
+/**
+ * restore the SageConstants.java that was modified during updateBuildNumber
+ */
+task (restoreSageConstants) << {
+	def file = new File('java/sage/SageConstants.java');
+	def fileBak = new File('java/sage/SageConstants.java.bak');
+	
+	if (fileBak.exists()) {
+		file.text = fileBak.text
+		System.out.println("Restored ${file}");
+		fileBak.deleteOnExit()
+	}	
+}
+
+// task dependencies
+compileJava.dependsOn updateBuildNumber
+sageJar.dependsOn cleanSageJar, classes
+miniclientJar.dependsOn clean, miniclientClasses, cleanMiniJar
+linuxMiniClientRelease.dependsOn miniclientJar
+sageJar.finalizedBy restoreSageConstants
+
+// Eclipse project setup
 eclipse {
     project {
         name = appName        
@@ -296,17 +374,88 @@ eclipse {
 	}
 }
 
+// ======= launch tasks for testing ========
+// Run configuration for MiniClient testing
+// NOTE you can run with ./gradlew linuxRunMiniClient --debug-jvm and then use
+// eclipse remote debugging on port 5005 to debug the app
+task linuxRunMiniClient(type:JavaExec) {
+	description 'Run the MiniClient.  Be sure you have run linuxMiniClientRelease at once, to get the dependency jars into the build/clientrelease area.'
+	main = "sage.miniclient.MiniClient"
+	classpath = fileTree(miniclientReleaseDestinationDir) {
+		include '*.jar'
+		exclude 'MiniClient.jar'
+	}
+	classpath += sourceSets.miniclient.runtimeClasspath
+	classpath += files('images/MiniClient/')
+	environment 'LD_LIBRARY_PATH', file(miniclientReleaseDestinationDir).getAbsolutePath()
+	workingDir file(miniclientReleaseDestinationDir)
+}
+
+linuxRunMiniClient.doFirst {
+	if (!new File(miniclientReleaseDestinationDir, 'sageclient.sh').exists()) {
+		System.out.println('\nRun ./gradlew linuxMiniClientRelease before running the client, for the first time.\n')
+		System.exit(1)
+	}
+}
+ 
+// Run configuration for Sage Server testing
+// NOTE you can run with ./gradlew linuxRunServer --debug-jvm and then use
+// eclipse remote debugging on port 5005 to debug the app
+task linuxRunServer(type:JavaExec) {
+	args '0', '0', 'x', 'sagetv Sage.properties'
+	main = "sage.Sage"
+	classpath = sourceSets.main.runtimeClasspath
+	classpath += files('images/SageTV/')
+	classpath += files('i18n')
+	
+	systemProperty 'java.awt.headless', true
+	environment 'LD_LIBRARY_PATH', file(sageReleaseDestinationDir).getAbsolutePath()
+	workingDir file(sageReleaseDestinationDir)
+}
+
+linuxRunServer.doFirst {
+	file(sageReleaseDestinationDir).mkdirs()
+	if (!new File(sageReleaseDestinationDir, 'libSage.so').exists()) {
+		System.out.println('\nRun build/buildall.sh to setup the build/serverrelease/ directory, before running the server for the first time.\n')
+		System.exit(1)
+	}
+}
+
+// Upload tasks
+// use ./gradlew bintrayUpload
+// make sure your BINTRAY_API is set in the environment
+// 
+bintray {
+	user = System.getenv("BINTRAY_USER")
+	key = System.getenv("BINTRAY_API");
+	filesSpec {
+		// from 'build/release'
+		from ('build') {
+			include '*.tar.gz', '*.deb', '*.zip'
+		}
+		into "sagetv/${baseVersion}"
+	}
+	dryRun = false //Whether to run this as dry-run, without deploying
+	publish = true //If version should be auto published after an upload
+	pkg {
+		repo = 'sagetv'
+		name = 'SageTV'
+		userOrg = 'opensagetv'
+		desc = "SageTV Release"
+		licenses = ['Apache-2.0']
+		vcsUrl = 'https://github.com/google/sagetv'
+		labels = ['sagetv']
+		publicDownloadNumbers = true
+		version {
+			name = "$baseVersion"
+			released  = new Date()
+			desc = "SageTV ${baseVersion}"
+			//vcsTag = "V${version}"
+			//attributes = ['gradle-plugin': 'com.use.less:com.use.less.gradle:gradle-useless-plugin']
+		}
+	}
+}
+
 // This get run when you call ./gradlew without any targets
 defaultTasks 'sageJar'
-
-// not currently used, but I'm keeping it here because shows how to detect Linux/Windows/Mac
-import org.gradle.internal.os.OperatingSystem;
-
-task detect {
-    doLast {
-		println(OperatingSystem.current().isWindows())
-        println(OperatingSystem.current().isMacOsX())
-        println(OperatingSystem.current().isLinux())
-    }   
-}
 

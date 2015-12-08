@@ -262,11 +262,26 @@ public final class Carny implements Runnable
       rv.setStopPadding(defaultFavoriteStopPadding);
     }
 
+    handleAddedFavorite(rv);
+
+    submitJob(new Object[] { LOVE_JOB, null });
+    sage.plugin.PluginEventManager.postEvent(sage.plugin.PluginEventManager.FAVORITE_ADDED,
+        new Object[] { sage.plugin.PluginEventManager.VAR_FAVORITE, rv });
+    return rv;
+  }
+
+  /**
+   * Update the internal Carny state after a favorite has been added (or enabled)
+   * @param rv The Favorite that was updated
+   */
+  private void handleAddedFavorite(Agent rv)
+  {
     // LOVESET UPDATE Make the updates to the loveSet that need to be & sync the clients
     // For add, we just add all of the Airings that match this Favorite to the loveAirSet
     List<Airing> airsToAdd = new ArrayList<Airing>();
     long start = Sage.time();
-    boolean keywordTest = (rv.agentMask&(Agent.LOVE_MASK|Agent.KEYWORD_MASK)) == (Agent.LOVE_MASK|Agent.KEYWORD_MASK);
+    boolean keywordTest = (rv.agentMask&(Agent.KEYWORD_MASK)) == (Agent.KEYWORD_MASK) &&
+        !Sage.getBoolean("use_legacy_keyword_favorites", true);
     if(keywordTest) {
       Show[] shows = wiz.searchShowsByKeyword(rv.getKeyword());
       for (Show show : shows) {
@@ -338,11 +353,8 @@ public final class Carny implements Runnable
       clientSyncAll();
       Scheduler.getInstance().kick(true);
     }
-    submitJob(new Object[] { LOVE_JOB, null });
-    sage.plugin.PluginEventManager.postEvent(sage.plugin.PluginEventManager.FAVORITE_ADDED,
-        new Object[] { sage.plugin.PluginEventManager.VAR_FAVORITE, rv });
-    return rv;
   }
+
   public Agent updateFavorite(Agent fav, int agentMask, String title, String category, String subCategory,
       Person person, int role, String rated, String year, String pr, String network,
       String chanName, int slotType, int[] timeslots, String keyword)
@@ -398,7 +410,8 @@ public final class Carny implements Runnable
     ArrayList<Airing> airsThatMayDie = new ArrayList<Airing>();
     ArrayList<Airing> airsThatWillSurvive = new ArrayList<Airing>();
     DBObject[] airs;
-    boolean keywordTest = ((oldFav.agentMask&fav.agentMask)&(Agent.LOVE_MASK|Agent.KEYWORD_MASK)) == (Agent.LOVE_MASK|Agent.KEYWORD_MASK);
+    boolean keywordTest = ((oldFav.agentMask&fav.agentMask)&(Agent.KEYWORD_MASK)) == (Agent.KEYWORD_MASK) &&
+        !Sage.getBoolean("use_legacy_keyword_favorites", true);
     if(keywordTest) {
       // Slim the haystack for finding needles faster.
       Set<Airing> airingsHaystack = new HashSet<Airing>();
@@ -537,10 +550,26 @@ public final class Carny implements Runnable
     } finally {
       wiz.releaseWriteLock(Wizard.AGENT_CODE);
     }
+
+    handleRemovedFavorite(fav, allFavs);
+
+    submitJob(new Object[] { LOVE_JOB, null });
+    sage.plugin.PluginEventManager.postEvent(sage.plugin.PluginEventManager.FAVORITE_REMOVED,
+        new Object[] { sage.plugin.PluginEventManager.VAR_FAVORITE, fav });
+  }
+
+  /**
+   * Update the internal Carny state after a favorite has been removed (or disabled)
+   * @param fav The Favorite that was removed
+   * @param allFavs The collection of all Favorites
+   */
+  private void handleRemovedFavorite(Agent fav, List<Agent> allFavs)
+  {
     // LOVESET UPDATE Make the updates to the loveSet that need to be & sync the clients
     List<Airing> airsThatMayDie = new ArrayList<Airing>();
     DBObject[] airs;
-    boolean keywordTest = (fav.agentMask & (Agent.LOVE_MASK|Agent.KEYWORD_MASK)) == (Agent.LOVE_MASK|Agent.KEYWORD_MASK);
+    boolean keywordTest = (fav.agentMask & (Agent.KEYWORD_MASK)) == (Agent.KEYWORD_MASK) &&
+        !Sage.getBoolean("use_legacy_keyword_favorites", true);
     if(keywordTest) {
       // Slim the haystack for finding needles faster.
       ArrayList<Airing> airingsHaystack = new ArrayList<Airing>();
@@ -614,9 +643,33 @@ public final class Carny implements Runnable
     }
 
     clientSyncLoves();
-    submitJob(new Object[] { LOVE_JOB, null });
-    sage.plugin.PluginEventManager.postEvent(sage.plugin.PluginEventManager.FAVORITE_REMOVED,
-        new Object[] { sage.plugin.PluginEventManager.VAR_FAVORITE, fav });
+  }
+
+  /**
+   * Set the enabled/disabled state of a favorite
+   * @param fav The Favorite to enable/disable
+   * @param enabled true if the given favorite should be enabled, false if it should be disabled
+   */
+  public void enableFavorite(Agent fav, boolean enabled)
+  {
+      //If the DISabled flag is equal to the ENabled parameter, then the call to this function should
+      //  change the state of the given Agent, otherwise nothing changes
+      if(fav.testAgentFlag(Agent.DISABLED_FLAG) == enabled)
+      {
+          //first update the agent flag
+          setAgentFlags(fav, Agent.DISABLED_FLAG, enabled?0:Agent.DISABLED_FLAG);
+
+          //Next update the Carny internal state
+          if(enabled) {
+              handleAddedFavorite(fav);
+          } else {
+              handleRemovedFavorite(fav, Arrays.asList(Wizard.getInstance().getFavorites()));
+          }
+
+          submitJob(new Object[] { LOVE_JOB, null });
+          sage.plugin.PluginEventManager.postEvent(sage.plugin.PluginEventManager.FAVORITE_MODIFIED,
+              new Object[] { sage.plugin.PluginEventManager.VAR_FAVORITE, fav });
+      }
   }
 
   private void clientSyncAll()
@@ -667,15 +720,17 @@ public final class Carny implements Runnable
     return true;
   }
 
-  public void addDontLike(Airing air)
+  public void addDontLike(Airing air, boolean manual)
   {
-    submitWasteJob(air, true, true);
+    submitWasteJob(air, true, manual);
+    Scheduler.getInstance().kick(true);
   }
   public void removeDontLike(Airing air)
   {
     submitWasteJob(air, false, true);
+    Scheduler.getInstance().kick(true);
   }
-  public void submitWasteJob(Airing air, boolean doWaste, boolean manual)
+  private void submitWasteJob(Airing air, boolean doWaste, boolean manual)
   {
     // Don't track Wasted for non-TV content
     if (SageConstants.LITE || !air.isTV()) return;
@@ -686,6 +741,13 @@ public final class Carny implements Runnable
     }
     else if (wiz.getWastedForAiring(air) != null)
       wiz.removeWasted(wiz.getWastedForAiring(air));
+    else {
+      // Just clear it for the Show
+      Show s = air.getShow();
+      if (s != null) {
+        s.setDontLike(false);
+      }
+    }
   }
 
   void submitJob(Object[] jobData)
@@ -956,7 +1018,7 @@ public final class Carny implements Runnable
         }
       }
       Agent currAgent = (Agent) allAgents[i];
-      if (currAgent == null)
+      if (currAgent == null || currAgent.testAgentFlag(Agent.DISABLED_FLAG))
         continue;
 
       if ((!doneInit && Sage.getBoolean("limited_carny_init", Sage.EMBEDDED)) ||
@@ -1153,7 +1215,7 @@ public final class Carny implements Runnable
 
   public int getWatchCount() { return globalWatchCount; }
 
-  synchronized float getWP(Airing air)
+  public synchronized float getWP(Airing air)
   {
     Float f = wpMap.get(air);
     if (f == null)
